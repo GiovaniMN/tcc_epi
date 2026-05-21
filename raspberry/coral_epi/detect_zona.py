@@ -13,7 +13,7 @@ from enum import Enum
 import base64
 from datetime import datetime
 
-#configuracao de log para erros
+#configuracao de log para erross
 logging.basicConfig(level=logging.ERROR, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
 
