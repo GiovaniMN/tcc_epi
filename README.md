@@ -1,190 +1,85 @@
-# Sistema de Monitoramento de EPIs com Raspberry Pi e YOLOv8 🚨📷
+# Sistema de Monitoramento de EPIs com Visão Computacional 🛡️👁️
 
-Este projeto utiliza um modelo de detecção de objetos **YOLOv8n** para monitorar o uso correto de Equipamentos de Proteção Individual (EPIs) em tempo real. O sistema é projetado para ser executado em dispositivos de borda como a **Raspberry Pi 4**, com aceleração opcional via **Coral Edge TPU**, e se integra a serviços em nuvem como **Firebase** e **Telegram** para alertas e monitoramento.
+Este repositório contém o desenvolvimento de um sistema inteligente para monitoramento e fiscalização automática do uso de Equipamentos de Proteção Individual (EPIs). O projeto integra **Visão Computacional na Borda (Edge AI)**, **Internet das Coisas (IoT)** e **Serviços em Nuvem** para criar uma solução de baixo custo e alta eficiência para a segurança do trabalho.
 
-## 📋 Tabela de Conteúdos
-1. [Funcionalidades](#-funcionalidades)
-2. [Informações do Modelo](#-informações-do-modelo)
-    - [Arquitetura](#arquitetura)
-    - [Classes Detectadas](#classes-detectadas)
-    - [Treinamento](#treinamento)
-    - [Performance](#performance)
-3. [Arquivos do Modelo](#-arquivos-do-modelo)
-4. [Tecnologias e Ferramentas](#-tecnologias-e-ferramentas)
-5. [Estrutura do Projeto](#-estrutura-do-projeto)
-6. [Configuração e Execução](#-configuração-e-execução)
-7. [Recursos do Projeto](#-recursos-do-projeto)
-8. [Licença](#-licença)
+## 📋 Resumo do Projeto
 
-## 🎯 Funcionalidades
+A segurança em ambientes industriais depende da conformidade rigorosa com normas de proteção. Este sistema visa automatizar a verificação de EPIs, eliminando a falibilidade da fiscalização manual. Utilizando uma arquitetura distribuída, o sistema processa imagens em tempo real em uma **Raspberry Pi 4**, acelerada por um **Google Coral Edge TPU**, e comunica infrações instantaneamente para supervisores via **Telegram**, enquanto mantém um registro auditável no **Firebase**.
 
-- 📦 Detecção em tempo real com YOLOv8 (PyTorch) ou TensorFlow Lite.
-- 🧠 Aceleração de inferência com **Coral Edge TPU** (usando o modelo `.tflite` quantizado).
-- 🔥 Integração com **Firebase Firestore** para registro de alertas e armazenamento de imagens.
-- 📲 Notificações instantâneas de não conformidade via **Telegram Bot**.
-- 🌐 Painel web hospedado no **Firebase Hosting** para:
-  - Autenticação de usuários.
-  - Visualização de histórico de ocorrências com imagens.
-  - Gerenciamento de usuários e zonas de monitoramento.
+O modelo de Inteligência Artificial foi treinado para detectar quatro classes fundamentais: **Pessoas**, **Capacetes**, **Óculos de Proteção** e **Botas de Segurança**.
 
 ---
 
-## 🧠 Informações do Modelo
+## 🏗️ Arquitetura Técnica
 
-### Arquitetura
-O modelo de detecção é baseado na arquitetura **YOLOv8n (nano)**, a menor e mais rápida da família YOLOv8, ideal para aplicações em dispositivos de borda com recursos limitados.
+O sistema foi projetado em uma arquitetura de três camadas: Borda, Lógica e Nuvem.
 
-### Classes Detectadas
-O modelo foi treinado para detectar as seguintes 4 classes:
-- `pessoa`
-- `capacete`
-- `oculos`
-- `bota`
+### 1. Hardware e Processamento na Borda
+A base do sistema é uma **Raspberry Pi 4**, escolhida por sua versatilidade e conectividade. Para superar as limitações de processamento de CPU em inferências de redes neurais, foi acoplado um **Google Coral USB Accelerator**.
+*   **Modelo:** YOLOv8n (Nano) quantizado para `int8` (Full Integer Quantization).
+*   **Framework:** TensorFlow Lite (EdgeTPU Runtime).
+*   **Multithreading:** O código (`raspberry/coral_epi/detect_zona.py`) implementa threads separadas para captura de vídeo (Webcam) e inferência, garantindo fluidez no processamento.
 
-### Treinamento
-O modelo foi treinado por **200 épocas** usando o framework Ultralytics. O comando de treinamento e os principais hiperparâmetros estão detalhados abaixo.
+### 2. Lógica de Máquina de Estados
+Para evitar falsos positivos e garantir que a análise ocorra apenas em momentos oportunos, o software implementa uma Máquina de Estados Finitos:
+*   **VAZIO:** O sistema monitora a zona de interesse com baixo consumo.
+*   **ENTRANDO:** Detecta a aproximação consistente de uma pessoa (validação por `FRAMES_PESSOA_ESTAVEL`).
+*   **ANALISANDO:** Coleta amostras durante um período fixo (`FRAMES_ANALISE_EPI`), acumulando estatísticas de detecção dos EPIs.
+*   **DECISÃO:** Compara a taxa de presença dos EPIs com o limiar configurado (`PROPORCAO_EPI_OK`).
+    *   **APROVADO:** Feedback visual verde.
+    *   **REJEITADO:** Feedback visual vermelho, disparo de foto para o Telegram e registro no banco de dados.
+*   **SAINDO:** Aguarda a liberação da área para reiniciar o ciclo.
 
-**Comando de Treinamento:**
-```bash
-!yolo task=detect mode=train \
-model=yolov8n.pt \
-data=/content/data.yaml \
-epochs=200 \
-imgsz=640 \
-batch=32 \
-optimizer=AdamW \
-lr0=0.0005 \
-lrf=0.01 \
-weight_decay=0.0005 \
-warmup_epochs=3 \
-warmup_momentum=0.9 \
-warmup_bias_lr=0.1 \
-close_mosaic=10 \
-mosaic=0.8 \
-mixup=0.15 \
-copy_paste=0.1 \
-hsv_h=0.015 hsv_s=0.5 hsv_v=0.4 \
-degrees=10 translate=0.1 scale=0.2 shear=5 \
-fliplr=0.5 \
-amp=True \
-cos_lr=True \
-project="epi_treinamento" \
-name="yolov8n_adamw_200epocas"
-```
-
-### Performance
-O modelo alcançou os seguintes resultados na validação final.
-
-**Métricas de Desempenho por Classe:**
-
-| Classe    | Imagens | Instâncias | Precision (P) | Recall (R) | mAP50      | mAP50-95   |
-| :-------- | :------ | :--------- | :------------ | :--------- | :--------- | :--------- |
-| **Todos** | **232** | **704**    | **0.947**     | **0.873**  | **0.939**  | **0.599**  |
-| Bota      | 63      | 152        | 0.897         | 0.809      | 0.893      | 0.582      |
-| Capacete  | 80      | 138        | 0.969         | 0.914      | 0.959      | 0.624      |
-| Óculos    | 107     | 124        | 0.947         | 0.862      | 0.941      | 0.538      |
-| Pessoa    | 201     | 290        | 0.974         | 0.908      | 0.963      | 0.654      |
-
-**Visualizações do Treinamento:**
-
-**Matriz de Confusão Normalizada:**
-*Mostra a precisão do modelo na classificação de cada objeto.*
-![Matriz de Confusão](models/yolov8n_pt/confusion_matrix_normalized.png)
-
-**Resultados da Validação:**
-*Exemplo de predições do modelo em um lote de validação.*
-![Predições na Validação](models/yolov8n_pt/val_batch0_pred.jpg)
-
-**Curvas de Métricas:**
-*Gráficos mostrando a evolução das métricas e da função de perda ao longo do treinamento.*
-![Resultados do Treinamento](models/yolov8n_pt/results.png)
+### 3. Integração em Nuvem
+*   **Firebase Firestore:** Atua como backend NoSQL, armazenando logs de alertas (timestamp, EPIs faltantes) e configurações de zonas de detecção.
+*   **Telegram Bot API:** Interface de notificação em tempo real. O sistema envia uma mensagem textual e a imagem da infração segundos após a detecção.
+*   **Dashboard Web:** Uma interface frontend (`sistema_de_monitoramento/`) consome os dados do Firestore para gerar relatórios e visualizações gerenciais.
 
 ---
 
-## 📦 Arquivos do Modelo
+## 📊 Resultados e Performance
 
-Os modelos treinados e convertidos estão localizados na pasta `models/`:
-- `models/yolov8n_pt/weights/best.pt`: Modelo treinado no formato PyTorch. Ideal para inferência em servidores ou máquinas com GPU.
-- `models/yolo_last_full_integer_quant_edgetpu.tflite`: Modelo convertido para TensorFlow Lite, com quantização de inteiros completos e otimizado para o **Google Coral Edge TPU**.
-- `models/yolov8n_edgetpu/`: Contém outras versões do modelo TFLite com diferentes tipos de quantização (`float16`, `int8`, etc.).
+A validação do sistema demonstrou a viabilidade da aplicação de visão computacional na borda para este cenário.
 
----
+### Métricas do Modelo (YOLOv8n)
+O modelo alcançou uma precisão média (mAP@0.5) de **93.9%**, com destaque para a detecção de pessoas e capacetes.
 
-## 🛠️ Tecnologias e Ferramentas
+| Classe | Precisão (P) | Revocação (R) | Análise |
+| :--- | :---: | :---: | :--- |
+| **Pessoa** | 97.4% | 90.8% | Alta confiabilidade, essencial para iniciar a máquina de estados. |
+| **Capacete** | 96.9% | 91.4% | Classe com melhor distinção visual. |
+| **Óculos** | 94.7% | 86.2% | Resultados robustos apesar da pequena área do objeto. |
+| **Bota** | 89.7% | 80.9% | Desempenho satisfatório, com sensibilidade à oclusão. |
 
-- **Hardware:** Raspberry Pi 4, Webcam, Coral Edge TPU (opcional).
-- **Software (Python):** `ultralytics`, `opencv-python`, `firebase-admin`, `requests`.
-- **Cloud & Backend:** Firebase (Firestore, Hosting, Authentication).
-- **Notificações:** Telegram Bot API.
+### Comparativo de Hardware (FPS)
+Testes práticos revelaram o impacto crítico do acelerador de hardware:
 
----
+*   **Com Coral Edge TPU:** O sistema mantém uma taxa estável entre **7 a 15 FPS**, suficiente para rastreamento em tempo real de pedestres.
+*   **Sem Aceleração (CPU):** A performance cai para menos de **1 FPS**, inviabilizando a aplicação prática.
+*   **Referência (PC i5-13500):** Atinge **30 FPS**, demonstrando a escalabilidade do software.
 
-## 📁 Estrutura do Projeto
-```
-.
-├── config/                  # Arquivos de configuração (templates)
-├── models/                  # Modelos treinados (PyTorch e TFLite)
-├── src/                     # Código fonte da aplicação de detecção
-├── sistema_de_monitoramento/  # Arquivos do frontend web
-├── LICENSE
-└── README.md
-```
+### Visualizações
+<div align="center">
+  <img src="models/yolov8n_pt/confusion_matrix_normalized.png" alt="Matriz de Confusão" width="45%">
+  <img src="models/yolov8n_pt/results.png" alt="Curvas de Treinamento" width="45%">
+</div>
 
 ---
 
-## 🚀 Configuração e Execução
+## 📂 Estrutura do Repositório
 
-### 1. Pré-requisitos
-- Python 3.9+
-- Node.js e npm (para a CLI do Firebase)
-- Conta no Firebase e um Bot no Telegram
+Este repositório organiza os artefatos do projeto da seguinte forma:
 
-### 2. Clone o Repositório
-```bash
-git clone https://github.com/SEU_USUARIO/SEU_REPOSITORIO.git
-cd SEU_REPOSITORIO
-```
-
-### 3. Ambiente Python
-1. Crie um ambiente virtual e instale as dependências:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Windows: venv\Scripts\activate
-   pip install ultralytics opencv-python firebase-admin requests
-   ```
-2. Configure as credenciais (Firebase, Telegram) e caminhos dos modelos no script `src/deteccao_example.py`.
-
-### 4. Ambiente Web (Firebase)
-1. Instale a CLI do Firebase: `npm install -g firebase-tools`
-2. Faça login: `firebase login`
-3. Configure o projeto: `firebase init hosting` (use `sistema_de_monitoramento` como diretório público).
-4. Faça o deploy: `firebase deploy --only hosting`
-
-### 5. Execução
-Com a câmera conectada e as configurações preenchidas, execute o script de detecção:
-```bash
-python src/deteccao_example.py
-```
-Pressione `ESC` para sair.
-
-Para uma explicação detalhada sobre a arquitetura do script, a lógica de detecção e todas as opções de configuração, consulte o nosso **[Guia Detalhado do Script de Detecção](docs/script_guide.md)**.
+*   `raspberry/coral_epi/`: Código fonte principal para execução na Raspberry Pi (Produção).
+*   `src/`: Versões de teste e desenvolvimento para ambientes Windows/Linux (sem Coral).
+*   `models/`: Arquivos binários dos modelos treinados (.pt e .tflite) e metadados de treinamento.
+*   `sistema_de_monitoramento/`: Código fonte da interface web (Dashboard).
+*   `docs/`: Documentação técnica detalhada da implementação.
 
 ---
 
-## 📚 Documentação Detalhada
+## ✅ Conclusão
 
-Para uma compreensão mais aprofundada da arquitetura e funcionamento do projeto, consulte os seguintes guias:
+O projeto validou com sucesso a hipótese de que dispositivos de borda de baixo custo podem realizar fiscalização ativa de segurança. A combinação de **YOLOv8** com **Edge TPU** proveu o balanço ideal entre precisão e performance, enquanto a integração com **Telegram** e **Firebase** modernizou o fluxo de resposta a incidentes de segurança.
 
-- **[Guia do Script de Detecção](docs/script_guide.md)**: Uma análise completa do script Python (`deteccao_example.py`), sua lógica de estados e opções de configuração.
-- **[Guia do Frontend (Painel Web)](docs/frontend_guide.md)**: Detalhes sobre a estrutura do painel web, suas páginas e a integração com o Firebase.
-- **[Guia de Deploy (CI/CD)](docs/deployment_guide.md)**: Explicação sobre o processo de deploy automatizado com GitHub Actions.
-
-## 🌐 Recursos do Projeto
-
-- **Notebook de Treinamento:** [Google Colab](https://colab.research.google.com/drive/1BYr0z8BnVe3F1YGCx2pwszZ-OZauiF_r)
-- **Notebook de Conversão TFLite:** [Google Colab](https://colab.research.google.com/drive/1MSoOiP4-XVVnBDQYYUN5ZcejGe85FNOt)
-
----
-
-## 📜 Licença
-Este projeto é licenciado sob a MIT License. Veja o arquivo [LICENSE](LICENSE) para detalhes.
+*Desenvolvido pelo Grupo 6 - Engenharia da Computação*
